@@ -290,6 +290,12 @@ table.calc .dim{opacity:.3}
 .tc-btns{display:flex;flex-wrap:wrap;gap:6px}
 .tc-btns .btn{box-shadow:0 2px 0 var(--ink);min-height:36px;font-size:13px;padding:3px 10px}
 
+.stepper{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.stepper .btn{width:52px;min-height:52px;padding:0;font-size:26px;line-height:1}
+.stepper input{width:92px;border:2.5px solid var(--ink);border-radius:14px;font:inherit;font-family:var(--head);font-size:30px;text-align:center;padding:5px 6px;background:#fff}
+.stepper .unit{font-weight:900;font-size:17px}
+.stepper .hint{margin-left:6px}
+
 </style>
 </head>
 <body>
@@ -728,7 +734,7 @@ window.FIREBASE_CONFIG = {
   var state = null, mode = 'local';
   var ctx = { role: '', code: '', t: 0, goal: 12, cls: null, tab: null, rev: 0, autoSit: false, busy: false };
   var ui = { screen: 'home', n: 4, names: ['', '', '', ''], goal: 12, tables: 6, code: '', name: '', picks: [], modal: null, give: null, fresh: '', saved: null, netState: 'wait', side: false };
-  var toastTimer = 0, lastScreen = '', tcache = {};
+  var toastTimer = 0, lastScreen = '', tcache = {}, MAX_TABLES = 20;
 
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function ico(i) { return '<img src="' + A['res_' + RES[i]] + '" alt="">'; }
@@ -942,9 +948,13 @@ window.FIREBASE_CONFIG = {
 
   /* ---------- 선생님: 수업 방 만들기 ---------- */
   function tnewHTML() {
-    var t = ''; for (var i = 1; i <= 8; i++) t += seg('tables', i, ui.tables, i + '모둠');
+    var stu = ui.tables ? ui.tables * 2 + '~' + ui.tables * 4 + '명이 함께 할 수 있어요.' : '모둠 수를 적어 주세요.';
     return '<div class="setup"><div class="setup-card">' + LOGO +
-      '<div class="field"><span class="lab">모둠은 몇 개인가요? (모둠마다 2~4명)</span><div class="seg tight">' + t + '</div></div>' +
+      '<div class="field"><label for="tbn">모둠은 몇 개인가요? (1~' + MAX_TABLES + '모둠, 모둠마다 2~4명)</label><div class="stepper">' +
+      '<button class="btn" data-act="tdec" aria-label="모둠 수 줄이기"' + (ui.tables > 1 ? '' : ' disabled') + '>−</button>' +
+      '<input id="tbn" data-in="tables" inputmode="numeric" maxlength="2" value="' + esc(ui.tables) + '" autocomplete="off" aria-label="모둠 수">' +
+      '<button class="btn" data-act="tinc" aria-label="모둠 수 늘리기"' + (ui.tables < MAX_TABLES ? '' : ' disabled') + '>+</button>' +
+      '<span class="unit">모둠</span><span class="hint" id="live">' + stu + '</span></div></div>' +
       '<div class="field"><span class="lab">목표 점수</span><div class="seg">' +
       seg('goal', 12, ui.goal, '12점', '짧은 판 (40분 수업)') + seg('goal', 20, ui.goal, '20점', '긴 판 (시간이 넉넉할 때)') + '</div></div>' +
       '<div class="setup-btns"><button class="btn" data-act="home">뒤로</button><button class="btn go" data-act="tcreate">수업 방 만들기</button></div>' +
@@ -1243,7 +1253,13 @@ window.FIREBASE_CONFIG = {
   document.addEventListener('input', function (e) {
     var k = e.target.dataset && e.target.dataset['in'];
     if (k === undefined) return;
-    if (k === 'code') { ui.code = e.target.value.replace(/\D/g, '').slice(0, 4); if (ui.code !== e.target.value) e.target.value = ui.code; }
+    if (k === 'tables') {
+      var tv = e.target.value.replace(/\D/g, '').slice(0, 2);
+      ui.tables = tv === '' ? '' : Math.max(1, Math.min(MAX_TABLES, +tv));
+      if (String(ui.tables) !== e.target.value) e.target.value = ui.tables;
+      var lv = document.getElementById('live'); if (lv) lv.textContent = ui.tables ? ui.tables * 2 + '~' + ui.tables * 4 + '명이 함께 할 수 있어요.' : '모둠 수를 적어 주세요.';
+    }
+    else if (k === 'code') { ui.code = e.target.value.replace(/\D/g, '').slice(0, 4); if (ui.code !== e.target.value) e.target.value = ui.code; }
     else if (k === 'name') { ui.name = e.target.value; lsSet(NAME_KEY, ui.name); }
     else ui.names[+k.slice(1)] = e.target.value;
   });
@@ -1266,10 +1282,12 @@ window.FIREBASE_CONFIG = {
       case 'join': if (ui.code.length !== 4) { toast('수업 코드는 숫자 4자리예요.'); return; } joinClass(ui.code); return;
       case 'local': ui.screen = 'setup'; ui.saved = lsGet(SAVE_KEY); if (ui.saved && (ui.saved.v !== 1 || ui.saved.phase === 'end')) ui.saved = null; break;
       case 'tnew': ui.screen = 'tnew'; break;
-      case 'tables': ui.tables = +d.v; break;
+      case 'tdec': ui.tables = Math.max(1, (+ui.tables || 2) - 1); break;
+      case 'tinc': ui.tables = Math.min(MAX_TABLES, (+ui.tables || 0) + 1); break;
       case 'tcreate':
+        if (!ui.tables) { toast('모둠 수를 1~' + MAX_TABLES + ' 사이로 적어요.'); return; }
         if (ctx.busy) return; ctx.busy = true;
-        Net.createClass({ tables: ui.tables, goal: ui.goal }).then(function (code) { ctx.busy = false; joinClass(code); }, function (e) { ctx.busy = false; toast(esc(e.message)); });
+        Net.createClass({ tables: +ui.tables, goal: ui.goal }).then(function (code) { ctx.busy = false; joinClass(code); }, function (e) { ctx.busy = false; toast(esc(e.message)); });
         return;
       case 'home': goHome(); break;
       /* 기기 한 대 */
